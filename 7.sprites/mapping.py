@@ -4,11 +4,11 @@ import sys
 pygame.init()
 
 # --- Configuration ---
-IMAGE_PATH = "knightspritesheet.jpg"
+IMAGE_PATH = "knightspritesheet.jpg"  # Or your updated .png if preferred
 WINDOW_TITLE = "Sprite Sheet Frame Visualizer"
 LINE_COLOR = (255, 0, 0)
 LINE_WIDTH = 1
-SCALE = 0.5  # ← Change this to zoom in/out (e.g. 1.0 = full size, 0.5 = half)
+SCALE = 0.5  # Change to zoom in/out (e.g. 1.0 = full size)
 
 # Load image first (but convert later)
 raw_image = pygame.image.load(IMAGE_PATH)
@@ -24,14 +24,26 @@ screen = pygame.display.set_mode((scaled_width, scaled_height))
 pygame.display.set_caption(WINDOW_TITLE)
 sprite_sheet = scaled_image.convert_alpha()
 
-# Scale frame rectangles
+# --- Frame data (Idle + Walk)
 original_frames = [
+    # IDLE (row 1)
     {"x": 430, "y": 50, "w": 134, "h": 150},
     {"x": 564, "y": 50, "w": 134, "h": 150},
     {"x": 698, "y": 50, "w": 134, "h": 150},
-    {"x": 832, "y": 50, "w": 134, "h": 150}
+    {"x": 832, "y": 50, "w": 134, "h": 150},
+
+    # WALK (row 2 - full 8 frames)
+    {"x": 430, "y": 200, "w": 134, "h": 150},
+    {"x": 564, "y": 200, "w": 134, "h": 150},
+    {"x": 698, "y": 200, "w": 134, "h": 150},
+    {"x": 832, "y": 200, "w": 134, "h": 150},
+    {"x": 986,  "y": 200, "w": 134, "h": 150},
+    {"x": 1120, "y": 200, "w": 134, "h": 150},
+    {"x": 1254, "y": 200, "w": 134, "h": 150},
+    {"x": 1388, "y": 200, "w": 134, "h": 150}
 ]
 
+# Apply scale to all frame rects
 frame_rects = [
     {
         "x": int(f["x"] * SCALE),
