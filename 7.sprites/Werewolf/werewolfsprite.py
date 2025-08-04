@@ -1,9 +1,10 @@
 import pygame
 import sys
+import os
+import math
 
 pygame.init()
 
-# --- Configuration ---
 SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
 FPS = 60
 WALK_SPEED = 5
@@ -24,7 +25,6 @@ game_font = pygame.font.Font(font_path, font_size)
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Werewolf Sim")
 
-# --- Load assets ---
 background_image = pygame.image.load("spookybackground.png").convert()
 background_image = pygame.transform.scale(background_image, (1920, SCREEN_HEIGHT))
 walk_sheet = pygame.image.load("walk.png").convert_alpha()
@@ -39,7 +39,20 @@ attack2_sheet = pygame.image.load("Attack_2.png").convert_alpha()
 attack3_sheet = pygame.image.load("Attack_3.png").convert_alpha()
 run_attack_sheet = pygame.image.load("Run+Attack.png").convert_alpha()
 
-# --- Extract tiles ---
+def load_wraith_idle_frames(folder_path):
+    return [
+        pygame.transform.scale(
+            pygame.transform.flip(
+                pygame.image.load(os.path.join(folder_path, f"Wraith_01_Idle_{i:03}.png")).convert_alpha(),
+                True, False
+            ),
+            (128, 129)
+        )
+        for i in range(12)
+    ]
+
+wraith_idle_frames = load_wraith_idle_frames("Wraith1Idle")
+
 def crop_tile(sheet, tile_x, tile_y, crop_size=384, tile_size=512):
     offset = (tile_size - crop_size) // 2
     x = tile_x * tile_size + offset
@@ -47,7 +60,6 @@ def crop_tile(sheet, tile_x, tile_y, crop_size=384, tile_size=512):
     return sheet.subsurface(pygame.Rect(x, y, crop_size, crop_size))
 
 gothic_tile = pygame.transform.scale(crop_tile(gothic_sheet, 0, 0), (TILE_SIZE, TILE_SIZE))
-
 tiles_across = background_image.get_width() // TILE_SIZE
 bridge_blocks = [pygame.Rect(i * TILE_SIZE, SCREEN_HEIGHT - TILE_SIZE, TILE_SIZE, TILE_SIZE) for i in range(tiles_across)]
 
@@ -89,6 +101,12 @@ attack_dx = 0
 fireball_label_x = 900
 fireball_label_y = SCREEN_HEIGHT - TILE_SIZE - 80
 label_rect = pygame.Rect(fireball_label_x, fireball_label_y, 160, 80)
+
+wraith_anim_timer = 0
+wraith_frame_index = 0
+hover_amplitude = 8
+hover_speed = 0.005
+hover_time = 0
 
 clock = pygame.time.Clock()
 running = True
@@ -234,6 +252,17 @@ while running:
         img_offset_x = fb_img.get_width() // 2
         img_offset_y = fb_img.get_height() // 2
         screen.blit(fb_img, (fb["x"] - img_offset_x - camera_x, fb["y"] - img_offset_y))
+
+    wraith_anim_timer += dt
+    if wraith_anim_timer >= IDLE_ANIM_SPEED:
+        wraith_anim_timer = 0
+        wraith_frame_index = (wraith_frame_index + 1) % len(wraith_idle_frames)
+    wraith_frame = wraith_idle_frames[wraith_frame_index]
+    wraith_x = 1300
+    visual_offset = 30
+    wraith_ground_y = SCREEN_HEIGHT - TILE_SIZE - wraith_frame.get_height() + visual_offset
+    wraith_y = wraith_ground_y
+    screen.blit(wraith_frame, (wraith_x - camera_x, wraith_y))
 
     if not fireball_unlocked:
         fireball_text = game_font.render("FIREBALL", True, (255, 0, 0))
