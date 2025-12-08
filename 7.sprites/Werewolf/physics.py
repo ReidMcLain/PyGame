@@ -1,40 +1,53 @@
 # physics.py
 import pygame
 
-def move_with_collisions(entity, solids, gravity=0.8):
+
+GRAVITY = 1.2
+MAX_FALL_SPEED = 25
+
+
+def move_with_collisions(obj, solids):
     """
-    Simple platformer physics:
-    - entity must have: x, y, vx, vy, frame_width, frame_height, on_ground, get_rect()
-    - solids is a list of pygame.Rect
+    Simple AABB platformer physics.
+
+    Expects obj to have:
+      - vx, vy
+      - on_ground (bool)
+      - get_rect() -> pygame.Rect
+      - x, y (center position)
     """
+    rect = obj.get_rect()
 
-    rect = entity.get_rect()
+    # --- vertical movement ---
+    obj.vy += GRAVITY
+    if obj.vy > MAX_FALL_SPEED:
+        obj.vy = MAX_FALL_SPEED
 
-    # Apply gravity
-    entity.vy += gravity
+    rect.y += int(round(obj.vy))
+    obj.on_ground = False
 
-    # --- Horizontal movement ---
-    rect.x += int(entity.vx)
     for s in solids:
         if rect.colliderect(s):
-            if entity.vx > 0:      # moving right; bump left
-                rect.right = s.left
-            elif entity.vx < 0:    # moving left; bump right
-                rect.left = s.right
-            entity.vx = 0
-
-    # --- Vertical movement ---
-    rect.y += int(entity.vy)
-    entity.on_ground = False
-    for s in solids:
-        if rect.colliderect(s):
-            if entity.vy > 0:      # falling; land on top
+            if obj.vy > 0:
+                # falling, hit floor
                 rect.bottom = s.top
-                entity.on_ground = True
-            elif entity.vy < 0:    # jumping up; hit head
+                obj.on_ground = True
+            elif obj.vy < 0:
+                # moving up, hit ceiling
                 rect.top = s.bottom
-            entity.vy = 0
+            obj.vy = 0
 
-    # Write back to entity center
-    entity.x = rect.left + entity.frame_width // 2
-    entity.y = rect.top + entity.frame_height // 2
+    # --- horizontal movement ---
+    rect.x += int(round(obj.vx))
+
+    for s in solids:
+        if rect.colliderect(s):
+            if obj.vx > 0:
+                rect.right = s.left
+            elif obj.vx < 0:
+                rect.left = s.right
+            obj.vx = 0
+
+    # --- write back via rect center (so hitbox can be any size) ---
+    obj.x = rect.centerx
+    obj.y = rect.centery
