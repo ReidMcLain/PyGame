@@ -3,6 +3,7 @@ import sys
 import math
 
 from physics import move_with_collisions
+from wraith import Wraith
 
 pygame.init()
 
@@ -10,21 +11,12 @@ SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
 FPS = 60
 TILE_SIZE = 64
 
-# Player hitbox tightening (bigger numbers = smaller hitbox)
 PLAYER_HIT_MARGIN_X = 30
 PLAYER_HIT_MARGIN_Y = 20
 
-# Wraith solid platform box
-WRAITH_SOLID_OX = 30
-WRAITH_SOLID_OY = 30
-WRAITH_SOLID_W  = 70
-WRAITH_SOLID_H  = 90
-
-# How high above the wraith's solidbox top the wolf stands
 LAND_OFFSET = 0
 
-# Show debug hitboxes
-DEBUG_BOXES = True
+DEBUG_BOXES = False
 
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
 pygame.display.set_caption("Werewolf 2 - Pygame Physics")
@@ -58,11 +50,9 @@ class Player:
         self.frame_width = 128
         self.frame_height = 128
 
-        # Movement animations
         self.idle_frames = self.load_sheet("assets/WerewolfAnimations/Idle.png", 8)
         self.walk_frames = self.load_sheet("assets/WerewolfAnimations/walk.png", 11)
 
-        # Attack animations
         self.attack1_frames = self.load_sheet("assets/WerewolfAnimations/Attack_1.png", 6)
         self.attack2_frames = self.load_sheet("assets/WerewolfAnimations/Attack_2.png", 4)
         self.attack3_frames = self.load_sheet("assets/WerewolfAnimations/Attack_3.png", 5)
@@ -82,16 +72,13 @@ class Player:
         self.on_ground = False
         self.facing_left = False
 
-        # Riding the wraith as a platform
         self.on_wraith = False
 
-        # Hitbox margins
         self.hit_margin_x = PLAYER_HIT_MARGIN_X
         self.hit_margin_y = PLAYER_HIT_MARGIN_Y
 
-        # Combo attack state
-        self.attack_mode = None          # "attack1", "attack2", "attack3"
-        self.attack_chain = 0            # 0,1,2 => attack1/2/3
+        self.attack_mode = None
+        self.attack_chain = 0
         self.attack_queued = False
 
     def load_sheet(self, filename, count):
@@ -115,7 +102,6 @@ class Player:
             self.frame_height - margin_y * 2,
         )
 
-    # --- attack hitbox for damaging enemies ---
     def get_attack_hitbox(self):
         if not self.attack_mode:
             return None
@@ -149,7 +135,6 @@ class Player:
     def handle_input(self, keys, mouse_buttons):
         self.vx = 0
 
-        # Movement only when not attacking
         if self.attack_mode is None:
             if keys[pygame.K_LEFT] or keys[pygame.K_a]:
                 self.vx = -self.speed
@@ -158,7 +143,6 @@ class Player:
                 self.vx = self.speed
                 self.facing_left = False
 
-        # Jump
         if (
             (keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP])
             and self.on_ground
@@ -167,24 +151,20 @@ class Player:
             self.vy = self.jump_impulse
             self.on_wraith = False
 
-        # Attacks (left mouse)
         left_click = mouse_buttons[0]
 
         if left_click:
             if self.attack_mode is None:
-                # Start a new attack in the chain
                 self.attack_mode = f"attack{self.attack_chain + 1}"
                 self.attack_queued = False
                 self.frame_index = 0
                 self.anim_timer = 0
                 self.vx = 0
             else:
-                # Queue next swing
                 if not self.attack_queued:
                     self.attack_queued = True
 
     def update(self, dt, solids):
-        # Physics
         if not self.on_wraith:
             move_with_collisions(self, solids)
         else:
@@ -192,7 +172,6 @@ class Player:
             self.vy = 0
             self.on_ground = True
 
-        # Movement state if not attacking
         if self.attack_mode is None:
             if self.on_ground and abs(self.vx) > 0.1:
                 self.state = "walk"
@@ -207,7 +186,6 @@ class Player:
                 self.anim_timer = 0
                 self.previous_state = self.state
 
-        # Choose frames
         if self.attack_mode is not None:
             if self.attack_mode == "attack1":
                 frames = self.attack1_frames
@@ -224,7 +202,6 @@ class Player:
                 frames = self.idle_frames
                 speed = self.anim_speed_idle
 
-        # Animate
         self.anim_timer += dt
         if self.anim_timer >= speed:
             self.anim_timer = 0
@@ -233,13 +210,11 @@ class Player:
             if self.attack_mode is not None:
                 if self.frame_index >= len(frames):
                     if self.attack_mode.startswith("attack") and self.attack_queued:
-                        # advance chain
                         self.attack_chain = (self.attack_chain + 1) % 3
                         self.attack_mode = f"attack{self.attack_chain + 1}"
                         self.frame_index = 0
                         self.attack_queued = False
                     else:
-                        # combo finished
                         self.attack_mode = None
                         self.attack_chain = 0
                         self.frame_index = 0
@@ -277,150 +252,6 @@ class Player:
             atk = self.get_attack_hitbox()
             if atk:
                 pygame.draw.rect(surface, (0, 255, 255), atk, 1)
-
-
-class Wraith:
-    def __init__(self, x, y, idle_folder, walk_folder, anim_speed, hover_amplitude, hover_speed):
-        self.x = x
-        self.y = y
-
-        self.anim_speed = anim_speed
-        self.hover_amplitude = hover_amplitude
-        self.hover_speed = hover_speed
-
-        self.idle_frames = self._load_seq(idle_folder, "Wraith_01_Idle_{i:03}.png", 12, (128, 129))
-        self.walk_frames = self._load_seq(
-            walk_folder, "Wraith_01_Moving Forward_{i:03}.png", 12, (128, 129)
-        )
-        # Hurt animation
-        self.hurt_frames = self._load_seq(
-            "Wraith1Hurt", "Wraith_01_Hurt_{i:03}.png", 12, (128, 129)
-        )
-
-        self.frames = self.idle_frames
-        self.frame_index = 0
-        self.anim_timer = 0
-
-        self.state = "idle"   # "idle", "walk", "hurt"
-        self.facing_left = False
-        self.speed = 1.0
-
-        self.hover_time = 0
-        self.hover_offset = 0
-        self.last_step = 0
-        self.has_rider = False
-
-        # Hurt / knockback
-        self.invuln_until = 0
-        self.knockback_vx = 0
-
-    def _load_seq(self, folder, pattern, count, size):
-        frames = []
-        for i in range(count):
-            img = pygame.image.load(
-                f"assets/{folder}/{pattern.format(i=i)}"
-            ).convert_alpha()
-            img = pygame.transform.scale(img, size)
-            frames.append(img)
-        return frames
-
-    def get_solidbox(self):
-        ox = WRAITH_SOLID_OX
-        oy = WRAITH_SOLID_OY
-        w = WRAITH_SOLID_W
-        h = WRAITH_SOLID_H
-        return pygame.Rect(self.x + ox, self.y + oy, w, h)
-
-    def get_hurtbox(self):
-        # For now just use same as solid box
-        return self.get_solidbox()
-
-    def _maybe_take_hit(self, now, player):
-        if now < self.invuln_until:
-            return
-        hitbox = player.get_attack_hitbox()
-        if not hitbox:
-            return
-        if hitbox.colliderect(self.get_hurtbox()):
-            self.state = "hurt"
-            self.frames = self.hurt_frames
-            self.frame_index = 0
-            self.anim_timer = 0
-            self.invuln_until = now + 300  # ms of i-frames
-            self.knockback_vx = -4 if player.facing_left else 4
-
-    def chase(self, player_x):
-        self.last_step = 0
-
-        if self.has_rider or self.state == "hurt":
-            return
-
-        dx = player_x - self.x
-        if abs(dx) > 5:
-            self.state = "walk"
-            self.frames = self.walk_frames
-            self.facing_left = dx < 0
-            step = -self.speed if self.facing_left else self.speed
-            self.x += step
-            self.last_step = step
-        else:
-            self.state = "idle"
-            self.frames = self.idle_frames
-
-    def update(self, dt, now, player):
-        # Check if the player is hitting us
-        self._maybe_take_hit(now, player)
-
-        # Hurt behavior
-        if self.state == "hurt":
-            # Knockback
-            if self.knockback_vx != 0:
-                self.x += self.knockback_vx
-                self.knockback_vx *= 0.82
-                if abs(self.knockback_vx) < 0.25:
-                    self.knockback_vx = 0
-
-            # Animate hurt once
-            self.anim_timer += dt
-            if self.anim_timer >= 70:
-                self.anim_timer = 0
-                self.frame_index += 1
-                if self.frame_index >= len(self.hurt_frames):
-                    self.state = "idle"
-                    self.frames = self.idle_frames
-                    self.frame_index = 0
-
-            # Still hover visually
-            self.hover_time += dt
-            self.hover_offset = math.sin(self.hover_time * self.hover_speed) * self.hover_amplitude
-            return
-
-        # Normal idle/walk animation
-        self.anim_timer += dt
-        if self.anim_timer >= self.anim_speed:
-            self.anim_timer = 0
-            self.frame_index = (self.frame_index + 1) % len(self.frames)
-
-        if self.has_rider:
-            self.hover_offset = 0
-        else:
-            self.hover_time += dt
-            self.hover_offset = math.sin(self.hover_time * self.hover_speed) * self.hover_amplitude
-
-    def draw(self, surface, camera_x=0):
-        frame = self.frames[self.frame_index]
-        if self.facing_left:
-            frame = pygame.transform.flip(frame, True, False)
-
-        surface.blit(
-            frame,
-            (self.x - camera_x, self.y + self.hover_offset),
-        )
-
-        if DEBUG_BOXES:
-            pygame.draw.rect(surface, (255, 0, 0), self.get_solidbox(), 1)
-            # hurtbox in yellow
-            pygame.draw.rect(surface, (255, 255, 0), self.get_hurtbox(), 1)
 
 
 def resolve_player_vs_wraith_horizontal(player, prev_rect, wraith):
@@ -535,7 +366,7 @@ def main():
             screen.blit(gothic_tile, (block.x, block.y))
 
         camera_x = 0
-        wraith.draw(screen, camera_x)
+        wraith.draw(screen, camera_x, DEBUG_BOXES)
         player.draw(screen, camera_x)
 
         pygame.display.flip()
