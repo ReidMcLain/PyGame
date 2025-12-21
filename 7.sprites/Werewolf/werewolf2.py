@@ -57,6 +57,9 @@ class Player:
         self.attack2_frames = self.load_sheet("assets/WerewolfAnimations/Attack_2.png", 4)
         self.attack3_frames = self.load_sheet("assets/WerewolfAnimations/Attack_3.png", 5)
 
+        self.hurt_frames = self.load_sheet("assets/WerewolfAnimations/Hurt.png", 2)
+        self.dead_frames = self.load_sheet("assets/WerewolfAnimations/Dead.png", 2)
+
         self.state = "idle"
         self.previous_state = self.state
         self.frame_index = 0
@@ -64,6 +67,8 @@ class Player:
         self.anim_speed_idle = 120
         self.anim_speed_walk = 80
         self.anim_speed_attack = 70
+        self.anim_speed_hurt = 80
+        self.anim_speed_dead = 120
 
         self.vx = 0
         self.vy = 0
@@ -81,13 +86,21 @@ class Player:
         self.attack_chain = 0
         self.attack_queued = False
 
+        self.max_health = 100
+        self.health = 100
+        self.invuln_until = 0
+        self.iframes_ms = 600
+
+        self.hurt_lock_frames = 2
+        self.hurt_lock_remaining = 0
+
+        self.dead = False
+
     def load_sheet(self, filename, count):
         sheet = pygame.image.load(filename).convert_alpha()
         frames = []
         for i in range(count):
-            frame = sheet.subsurface(
-                pygame.Rect(i * self.frame_width, 0, self.frame_width, self.frame_height)
-            )
+            frame = sheet.subsurface(pygame.Rect(i * self.frame_width, 0, self.frame_width, self.frame_height))
             frames.append(frame)
         return frames
 
@@ -132,7 +145,40 @@ class Player:
         y = base.centery - h // 2
         return pygame.Rect(x, y, w, h)
 
+    def take_damage(self, amount, now):
+        if self.dead:
+            return False
+        if now < self.invuln_until:
+            return False
+
+        self.health -= amount
+        if self.health < 0:
+            self.health = 0
+
+        self.invuln_until = now + self.iframes_ms
+        self.hurt_lock_remaining = self.hurt_lock_frames
+
+        if self.health == 0:
+            self.dead = True
+            self.state = "dead"
+            self.previous_state = "dead"
+            self.attack_mode = None
+            self.attack_chain = 0
+            self.attack_queued = False
+            self.frame_index = 0
+            self.anim_timer = 0
+
+        return True
+
     def handle_input(self, keys, mouse_buttons):
+        if self.dead:
+            self.vx = 0
+            return
+
+        if self.hurt_lock_remaining > 0:
+            self.vx = 0
+            return
+
         self.vx = 0
 
         if self.attack_mode is None:
@@ -143,11 +189,7 @@ class Player:
                 self.vx = self.speed
                 self.facing_left = False
 
-        if (
-            (keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP])
-            and self.on_ground
-            and self.attack_mode is None
-        ):
+        if (keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]) and self.on_ground and self.attack_mode is None:
             self.vy = self.jump_impulse
             self.on_wraith = False
 
@@ -165,6 +207,16 @@ class Player:
                     self.attack_queued = True
 
     def update(self, dt, solids):
+        if self.dead:
+            self.vx = 0
+            self.vy = 0
+            self.anim_timer += dt
+            if self.anim_timer >= self.anim_speed_dead:
+                self.anim_timer = 0
+                if self.frame_index < len(self.dead_frames) - 1:
+                    self.frame_index += 1
+            return
+
         if not self.on_wraith:
             move_with_collisions(self, solids)
         else:
@@ -172,42 +224,53 @@ class Player:
             self.vy = 0
             self.on_ground = True
 
-        if self.attack_mode is None:
-            if self.on_ground and abs(self.vx) > 0.1:
-                self.state = "walk"
-            elif self.on_ground:
-                self.state = "idle"
-            else:
-                if self.state not in ("walk", "idle"):
-                    self.state = "idle"
+        if self.hurt_lock_remaining > 0:
+            self.hurt_lock_remaining -= 1
 
+        if self.hurt_lock_remaining > 0:
+            self.state = "hurt"
+            frames = self.hurt_frames
+            speed = self.anim_speed_hurt
+        else:
+            if self.attack_mode is not None:
+                if self.attack_mode == "attack1":
+                    frames = self.attack1_frames
+                elif self.attack_mode == "attack2":
+                    frames = self.attack2_frames
+                else:
+                    frames = self.attack3_frames
+                speed = self.anim_speed_attack
+            else:
+                if self.on_ground and abs(self.vx) > 0.1:
+                    self.state = "walk"
+                elif self.on_ground:
+                    self.state = "idle"
+                else:
+                    if self.state not in ("walk", "idle"):
+                        self.state = "idle"
+
+                if self.state == "walk":
+                    frames = self.walk_frames
+                    speed = self.anim_speed_walk
+                else:
+                    frames = self.idle_frames
+                    speed = self.anim_speed_idle
+
+        if self.attack_mode is None and self.state in ("idle", "walk"):
             if self.state != self.previous_state:
                 self.frame_index = 0
                 self.anim_timer = 0
                 self.previous_state = self.state
-
-        if self.attack_mode is not None:
-            if self.attack_mode == "attack1":
-                frames = self.attack1_frames
-            elif self.attack_mode == "attack2":
-                frames = self.attack2_frames
-            else:
-                frames = self.attack3_frames
-            speed = self.anim_speed_attack
-        else:
-            if self.state == "walk":
-                frames = self.walk_frames
-                speed = self.anim_speed_walk
-            else:
-                frames = self.idle_frames
-                speed = self.anim_speed_idle
 
         self.anim_timer += dt
         if self.anim_timer >= speed:
             self.anim_timer = 0
             self.frame_index += 1
 
-            if self.attack_mode is not None:
+            if self.hurt_lock_remaining > 0:
+                if self.frame_index >= len(frames):
+                    self.frame_index = 0
+            elif self.attack_mode is not None:
                 if self.frame_index >= len(frames):
                     if self.attack_mode.startswith("attack") and self.attack_queued:
                         self.attack_chain = (self.attack_chain + 1) % 3
@@ -222,7 +285,11 @@ class Player:
                 self.frame_index %= len(frames)
 
     def draw(self, surface, camera_x=0):
-        if self.attack_mode is not None:
+        if self.dead:
+            frames = self.dead_frames
+        elif self.hurt_lock_remaining > 0:
+            frames = self.hurt_frames
+        elif self.attack_mode is not None:
             if self.attack_mode == "attack1":
                 frames = self.attack1_frames
             elif self.attack_mode == "attack2":
@@ -302,6 +369,29 @@ def land_player_on_wraith_from_above(player, prev_rect, wraith):
     return True
 
 
+def draw_player_hud(surface, player):
+    bar_x = 20
+    bar_y = 20
+    bar_w = 240
+    bar_h = 18
+
+    frac = player.health / player.max_health if player.max_health > 0 else 0
+    if frac < 0:
+        frac = 0
+    if frac > 1:
+        frac = 1
+
+    bg = pygame.Rect(bar_x, bar_y, bar_w, bar_h)
+    fg = pygame.Rect(bar_x, bar_y, int(bar_w * frac), bar_h)
+
+    pygame.draw.rect(surface, (0, 0, 0), bg)
+    pygame.draw.rect(surface, (180, 0, 0), fg)
+
+    font = pygame.font.SysFont(None, 22)
+    text = font.render(f"HP: {player.health}/{player.max_health}", True, (255, 255, 255))
+    surface.blit(text, (bar_x, bar_y + bar_h + 6))
+
+
 def main():
     clock = pygame.time.Clock()
 
@@ -326,6 +416,10 @@ def main():
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 running = False
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_F1:
+                    global DEBUG_BOXES
+                    DEBUG_BOXES = not DEBUG_BOXES
 
         keys = pygame.key.get_pressed()
         mouse_buttons = pygame.mouse.get_pressed()
@@ -368,6 +462,8 @@ def main():
         camera_x = 0
         wraith.draw(screen, camera_x, DEBUG_BOXES)
         player.draw(screen, camera_x)
+
+        draw_player_hud(screen, player)
 
         pygame.display.flip()
 
