@@ -1,9 +1,9 @@
 import pygame
 import sys
-import math
 
 from physics import move_with_collisions
 from wraith import Wraith
+from level_manager import LevelManager
 
 pygame.init()
 
@@ -15,8 +15,6 @@ PLAYER_HIT_MARGIN_X = 30
 PLAYER_HIT_MARGIN_Y = 20
 
 LAND_OFFSET = 0
-
-BOUND_THICKNESS = 64
 
 DEBUG_BOXES = False
 
@@ -42,12 +40,7 @@ bridge_blocks = [
     pygame.Rect(i * TILE_SIZE, SCREEN_HEIGHT - TILE_SIZE, TILE_SIZE, TILE_SIZE)
     for i in range(tiles_across)
 ]
-world_walls = [
-    pygame.Rect(-BOUND_THICKNESS, 0, BOUND_THICKNESS, SCREEN_HEIGHT),
-    pygame.Rect(SCREEN_WIDTH, 0, BOUND_THICKNESS, SCREEN_HEIGHT),
-    pygame.Rect(0, -BOUND_THICKNESS, SCREEN_WIDTH, BOUND_THICKNESS),
-    pygame.Rect(0, SCREEN_HEIGHT, SCREEN_WIDTH, BOUND_THICKNESS),
-]
+
 
 class Player:
     def __init__(self, x, y):
@@ -59,14 +52,10 @@ class Player:
 
         self.idle_frames = self.load_sheet("assets/WerewolfAnimations/Idle.png", 8)
         self.walk_frames = self.load_sheet("assets/WerewolfAnimations/walk.png", 11)
-        self.run_frames = self.load_sheet("assets/WerewolfAnimations/Run.png", 9)
-        self.jump_frames = self.load_sheet("assets/WerewolfAnimations/Jump.png", 11)
 
         self.attack1_frames = self.load_sheet("assets/WerewolfAnimations/Attack_1.png", 6)
         self.attack2_frames = self.load_sheet("assets/WerewolfAnimations/Attack_2.png", 4)
         self.attack3_frames = self.load_sheet("assets/WerewolfAnimations/Attack_3.png", 5)
-
-        self.run_attack_frames = self.load_sheet("assets/WerewolfAnimations/Run+Attack.png", 7)
 
         self.hurt_frames = self.load_sheet("assets/WerewolfAnimations/Hurt.png", 2)
         self.dead_frames = self.load_sheet("assets/WerewolfAnimations/Dead.png", 2)
@@ -75,20 +64,15 @@ class Player:
         self.previous_state = self.state
         self.frame_index = 0
         self.anim_timer = 0
-
         self.anim_speed_idle = 120
         self.anim_speed_walk = 80
-        self.anim_speed_run = 70
-        self.anim_speed_jump = 65
         self.anim_speed_attack = 70
-        self.anim_speed_run_attack = 65
         self.anim_speed_hurt = 80
         self.anim_speed_dead = 120
 
         self.vx = 0
         self.vy = 0
-        self.walk_speed = 5
-        self.run_speed = 8
+        self.speed = 5
         self.jump_impulse = -18
         self.on_ground = False
         self.facing_left = False
@@ -102,8 +86,6 @@ class Player:
         self.attack_chain = 0
         self.attack_queued = False
 
-        self.run_attack_locked_vx = 0
-
         self.max_health = 100
         self.health = 100
         self.invuln_until = 0
@@ -113,8 +95,6 @@ class Player:
         self.hurt_lock_remaining = 0
 
         self.dead = False
-
-        self.running = False
 
     def load_sheet(self, filename, count):
         sheet = pygame.image.load(filename).convert_alpha()
@@ -143,7 +123,6 @@ class Player:
             "attack1": {"frames": (2, 3), "reach": 10, "w": 40, "h": 44},
             "attack2": {"frames": (2, 3), "reach": 12, "w": 44, "h": 48},
             "attack3": {"frames": (2, 4), "reach": 14, "w": 48, "h": 50},
-            "run_attack": {"frames": (2, 5), "reach": 12, "w": 46, "h": 48},
         }
 
         if self.attack_mode not in spec:
@@ -200,26 +179,15 @@ class Player:
             self.vx = 0
             return
 
-        if self.attack_mode == "run_attack":
-            self.vx = self.run_attack_locked_vx
-            return
-
         self.vx = 0
-        self.running = False
-
-        wants_run = keys[pygame.K_LSHIFT] or keys[pygame.K_RSHIFT]
-        speed = self.run_speed if wants_run else self.walk_speed
 
         if self.attack_mode is None:
             if keys[pygame.K_LEFT] or keys[pygame.K_a]:
-                self.vx = -speed
+                self.vx = -self.speed
                 self.facing_left = True
             elif keys[pygame.K_RIGHT] or keys[pygame.K_d]:
-                self.vx = speed
+                self.vx = self.speed
                 self.facing_left = False
-
-        if abs(self.vx) > 0.1 and wants_run and self.on_ground and self.attack_mode is None:
-            self.running = True
 
         if (keys[pygame.K_SPACE] or keys[pygame.K_w] or keys[pygame.K_UP]) and self.on_ground and self.attack_mode is None:
             self.vy = self.jump_impulse
@@ -229,34 +197,14 @@ class Player:
 
         if left_click:
             if self.attack_mode is None:
-                run_attack_ok = wants_run and self.on_ground and abs(self.vx) > 0.1
-                if run_attack_ok:
-                    self.attack_mode = "run_attack"
-                    self.attack_chain = 0
-                    self.attack_queued = False
-                    self.frame_index = 0
-                    self.anim_timer = 0
-                    self.run_attack_locked_vx = self.vx
-                else:
-                    self.attack_mode = f"attack{self.attack_chain + 1}"
-                    self.attack_queued = False
-                    self.frame_index = 0
-                    self.anim_timer = 0
-                    self.vx = 0
+                self.attack_mode = f"attack{self.attack_chain + 1}"
+                self.attack_queued = False
+                self.frame_index = 0
+                self.anim_timer = 0
+                self.vx = 0
             else:
-                if self.attack_mode.startswith("attack") and not self.attack_queued:
+                if not self.attack_queued:
                     self.attack_queued = True
-
-    def _choose_base_animation(self):
-        if not self.on_ground and not self.on_wraith:
-            return "jump", self.jump_frames, self.anim_speed_jump
-
-        if self.on_ground and abs(self.vx) > 0.1:
-            if self.running:
-                return "run", self.run_frames, self.anim_speed_run
-            return "walk", self.walk_frames, self.anim_speed_walk
-
-        return "idle", self.idle_frames, self.anim_speed_idle
 
     def update(self, dt, solids):
         if self.dead:
@@ -269,12 +217,7 @@ class Player:
                     self.frame_index += 1
             return
 
-        if not self.on_wraith:
-            move_with_collisions(self, solids)
-        else:
-            self.x += self.vx
-            self.vy = 0
-            self.on_ground = True
+        move_with_collisions(self, solids)
 
         if self.hurt_lock_remaining > 0:
             self.hurt_lock_remaining -= 1
@@ -287,20 +230,28 @@ class Player:
             if self.attack_mode is not None:
                 if self.attack_mode == "attack1":
                     frames = self.attack1_frames
-                    speed = self.anim_speed_attack
                 elif self.attack_mode == "attack2":
                     frames = self.attack2_frames
-                    speed = self.anim_speed_attack
-                elif self.attack_mode == "attack3":
-                    frames = self.attack3_frames
-                    speed = self.anim_speed_attack
                 else:
-                    frames = self.run_attack_frames
-                    speed = self.anim_speed_run_attack
+                    frames = self.attack3_frames
+                speed = self.anim_speed_attack
             else:
-                self.state, frames, speed = self._choose_base_animation()
+                if self.on_ground and abs(self.vx) > 0.1:
+                    self.state = "walk"
+                elif self.on_ground:
+                    self.state = "idle"
+                else:
+                    if self.state not in ("walk", "idle"):
+                        self.state = "idle"
 
-        if self.attack_mode is None and self.hurt_lock_remaining <= 0 and self.state in ("idle", "walk", "run", "jump"):
+                if self.state == "walk":
+                    frames = self.walk_frames
+                    speed = self.anim_speed_walk
+                else:
+                    frames = self.idle_frames
+                    speed = self.anim_speed_idle
+
+        if self.attack_mode is None and self.state in ("idle", "walk"):
             if self.state != self.previous_state:
                 self.frame_index = 0
                 self.anim_timer = 0
@@ -309,23 +260,14 @@ class Player:
         self.anim_timer += dt
         if self.anim_timer >= speed:
             self.anim_timer = 0
-
-            if self.dead:
-                return
+            self.frame_index += 1
 
             if self.hurt_lock_remaining > 0:
-                self.frame_index += 1
                 if self.frame_index >= len(frames):
                     self.frame_index = 0
-
             elif self.attack_mode is not None:
-                self.frame_index += 1
                 if self.frame_index >= len(frames):
-                    if self.attack_mode == "run_attack":
-                        self.attack_mode = None
-                        self.frame_index = 0
-                        self.run_attack_locked_vx = 0
-                    elif self.attack_mode.startswith("attack") and self.attack_queued:
+                    if self.attack_mode.startswith("attack") and self.attack_queued:
                         self.attack_chain = (self.attack_chain + 1) % 3
                         self.attack_mode = f"attack{self.attack_chain + 1}"
                         self.frame_index = 0
@@ -334,15 +276,8 @@ class Player:
                         self.attack_mode = None
                         self.attack_chain = 0
                         self.frame_index = 0
-
             else:
-                if self.state == "jump":
-                    if self.frame_index < len(frames) - 1:
-                        self.frame_index += 1
-                    else:
-                        self.frame_index = len(frames) - 1
-                else:
-                    self.frame_index = (self.frame_index + 1) % len(frames)
+                self.frame_index %= len(frames)
 
     def draw(self, surface, camera_x=0):
         if self.dead:
@@ -354,19 +289,12 @@ class Player:
                 frames = self.attack1_frames
             elif self.attack_mode == "attack2":
                 frames = self.attack2_frames
-            elif self.attack_mode == "attack3":
+            else:
                 frames = self.attack3_frames
-            else:
-                frames = self.run_attack_frames
+        elif self.state == "walk":
+            frames = self.walk_frames
         else:
-            if not self.on_ground and not self.on_wraith:
-                frames = self.jump_frames
-            elif self.state == "run":
-                frames = self.run_frames
-            elif self.state == "walk":
-                frames = self.walk_frames
-            else:
-                frames = self.idle_frames
+            frames = self.idle_frames
 
         idx = min(self.frame_index, len(frames) - 1)
         frame = frames[idx]
@@ -411,32 +339,10 @@ def resolve_player_vs_wraith_horizontal(player, prev_rect, wraith):
 
 
 def land_player_on_wraith_from_above(player, prev_rect, wraith):
-    p_rect = player.get_rect()
-    w_rect = wraith.get_solidbox()
-
-    if player.vy < 0:
-        return False
-
-    if p_rect.right <= w_rect.left or p_rect.left >= w_rect.right:
-        return False
-
-    if prev_rect.bottom > w_rect.top:
-        return False
-
-    if p_rect.bottom < w_rect.top:
-        return False
-
-    p_rect.bottom = w_rect.top - LAND_OFFSET
-    player.y = p_rect.centery
-    player.vy = 0
-    player.vx = 0
-    player.on_ground = True
-    player.on_wraith = True
-    wraith.has_rider = True
-    return True
+    return False
 
 
-def draw_player_hud(surface, player):
+def draw_player_hud(surface, player, level_manager):
     bar_x = 20
     bar_y = 20
     bar_w = 240
@@ -458,15 +364,27 @@ def draw_player_hud(surface, player):
     text = font.render(f"HP: {player.health}/{player.max_health}", True, (255, 255, 255))
     surface.blit(text, (bar_x, bar_y + bar_h + 6))
 
+    font2 = pygame.font.SysFont(None, 28)
+    lvl = font2.render(f"Level: {level_manager.level}", True, (255, 255, 255))
+    surface.blit(lvl, (bar_x, bar_y + bar_h + 30))
 
-def main():
-    clock = pygame.time.Clock()
 
-    player_start_y = SCREEN_HEIGHT - TILE_SIZE - 64
-    player = Player(SCREEN_WIDTH // 2, player_start_y)
+def draw_game_over(surface, level_manager):
+    font = pygame.font.SysFont(None, 56)
+    font2 = pygame.font.SysFont(None, 28)
 
-    wraith = Wraith(
-        x=SCREEN_WIDTH - 150,
+    msg = font.render("GAME OVER", True, (255, 255, 255))
+    msg2 = font2.render(f"You reached level {level_manager.reached_level()}", True, (255, 255, 255))
+    msg3 = font2.render("Press ESC to quit", True, (255, 255, 255))
+
+    surface.blit(msg, (SCREEN_WIDTH // 2 - msg.get_width() // 2, SCREEN_HEIGHT // 2 - 80))
+    surface.blit(msg2, (SCREEN_WIDTH // 2 - msg2.get_width() // 2, SCREEN_HEIGHT // 2 - 20))
+    surface.blit(msg3, (SCREEN_WIDTH // 2 - msg3.get_width() // 2, SCREEN_HEIGHT // 2 + 20))
+
+
+def spawn_wraith_at(x):
+    return Wraith(
+        x=x,
         y=SCREEN_HEIGHT - TILE_SIZE - 128 + 30,
         idle_folder="Wraith1Idle",
         walk_folder="Wraith1Walking",
@@ -474,6 +392,26 @@ def main():
         hover_amplitude=8,
         hover_speed=0.005,
     )
+
+
+def main():
+    clock = pygame.time.Clock()
+
+    player_start_y = SCREEN_HEIGHT - TILE_SIZE - 64
+    player = Player(SCREEN_WIDTH // 2, player_start_y)
+
+    level_manager = LevelManager(
+        SCREEN_WIDTH,
+        SCREEN_HEIGHT,
+        fade_out_ms=700,
+        fade_in_ms=400,
+        breather_ms=3000,
+        spawn_min_dist=250,
+        spawn_max_dist=450,
+        edge_margin=90,
+    )
+
+    wraiths = []
 
     running = True
     while running:
@@ -491,46 +429,76 @@ def main():
         keys = pygame.key.get_pressed()
         mouse_buttons = pygame.mouse.get_pressed()
 
+        if level_manager.is_game_over():
+            if keys[pygame.K_ESCAPE]:
+                running = False
+
+            screen.blit(background_image, (0, 0))
+            for block in bridge_blocks:
+                screen.blit(gothic_tile, (block.x, block.y))
+
+            for w in wraiths:
+                w.draw(screen, 0, DEBUG_BOXES)
+            player.draw(screen, 0)
+
+            draw_game_over(screen, level_manager)
+            pygame.display.flip()
+            continue
+
+        level_manager.begin_level_if_needed(now, player.x)
+        spawn_xs = level_manager.consume_spawn_queue()
+        if spawn_xs:
+            wraiths = [spawn_wraith_at(x) for x in spawn_xs]
+
+        transition_locked = level_manager.is_transition_locked()
+
         prev_player_rect = player.get_rect()
 
-        wraith.chase(player.x)
-        wraith.update(dt, now, player)
+        if not transition_locked:
+            for w in wraiths:
+                w.chase(player.x)
+                w.update(dt, now, player)
+        else:
+            for w in wraiths:
+                w.last_step = 0
 
-        if not player.on_wraith and wraith.get_solidbox().colliderect(prev_player_rect):
-            wraith.x -= wraith.last_step
+        solids = list(bridge_blocks)
 
-        solids = list(bridge_blocks) + world_walls
-        player.handle_input(keys, mouse_buttons)
-        player.update(dt, solids)
-
-        if player.on_wraith:
-            w_rect = wraith.get_solidbox()
-            p_rect = player.get_rect()
-            p_rect.bottom = w_rect.top - LAND_OFFSET
-            player.y = p_rect.centery
+        if not transition_locked:
+            player.handle_input(keys, mouse_buttons)
+            player.update(dt, solids)
+        else:
+            player.vx = 0
             player.vy = 0
-            player.on_ground = True
-            wraith.has_rider = True
+            player.attack_mode = None
+            player.attack_chain = 0
+            player.attack_queued = False
+            player.update(0, solids)
 
-            if p_rect.right <= w_rect.left or p_rect.left >= w_rect.right:
-                player.on_wraith = False
-                wraith.has_rider = False
+        for w in wraiths:
+            if w.get_solidbox().colliderect(prev_player_rect) and w.last_step != 0:
+                w.x -= w.last_step
 
-        landed = land_player_on_wraith_from_above(player, prev_player_rect, wraith)
+        for w in wraiths:
+            resolve_player_vs_wraith_horizontal(player, prev_player_rect, w)
 
-        if not landed and not player.on_wraith:
-            wraith.has_rider = False
-            resolve_player_vs_wraith_horizontal(player, prev_player_rect, wraith)
+        level_manager.notify_level_clear_if_ready(now, wraiths)
+        level_manager.update(now)
+
+        if player.dead and player.frame_index >= len(player.dead_frames) - 1:
+            level_manager.trigger_game_over()
 
         screen.blit(background_image, (0, 0))
         for block in bridge_blocks:
             screen.blit(gothic_tile, (block.x, block.y))
 
         camera_x = 0
-        wraith.draw(screen, camera_x, DEBUG_BOXES)
+        for w in wraiths:
+            w.draw(screen, camera_x, DEBUG_BOXES)
         player.draw(screen, camera_x)
 
-        draw_player_hud(screen, player)
+        draw_player_hud(screen, player, level_manager)
+        level_manager.draw_fade(screen)
 
         pygame.display.flip()
 

@@ -73,6 +73,7 @@ class Wraith:
         self.max_health = 3
         self.health = 3
         self.alive = True
+        self.death_anim_finished = False
 
         self.attack_frame_start = 5
         self.attack_frame_end = 7
@@ -131,7 +132,7 @@ class Wraith:
         return frames
 
     def get_solidbox(self):
-        if not self.alive:
+        if not self.alive and self.state != "dying":
             return pygame.Rect(0, 0, 0, 0)
 
         return pygame.Rect(self.x + WRAITH_SOLID_OX, self.y + WRAITH_SOLID_OY, WRAITH_SOLID_W, WRAITH_SOLID_H)
@@ -257,6 +258,7 @@ class Wraith:
                     self.frame_index = len(self.dying_frames) - 1
                     self.state = "dead"
                     self.alive = False
+                    self.death_anim_finished = True
             self.hover_offset = 0
             return
 
